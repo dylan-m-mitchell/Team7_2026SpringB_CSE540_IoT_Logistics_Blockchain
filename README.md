@@ -42,7 +42,7 @@ contract and simulate peers.
     as of step 1.
 4. Create a channel for the two organizations via `$./network.sh createChannel`.
     This will create a channel with the default name
-5. Deploy the chaincode via `$ ./network.sh deployCC -ccn assetTransfer -ccl typescript -ccp <path to assetTransfer.ts>`
+5. Deploy the chaincode via `$ ./network.sh deployCC -ccn assetTransfer -ccl typescript -ccp <path to CSE540_Team7_Project directory>`
 6. Interact with the network and specific peers and organizations by setting
     environment variables in your terminal and running the fabric `peer` command.
     ```
