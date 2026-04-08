@@ -1,17 +1,39 @@
 /* In the fabric samples this logic is separated into a separate file from the
 type definition */
 
-import {Context, Contract, Info, Returns, Transaction, ClientIdentity} from 'fabric-contract-api';
+import { Context, Contract, Info, Returns, Transaction } from 'fabric-contract-api';
 import stringify from 'json-stringify-deterministic';
 import sortKeysRecursive from 'sort-keys-recursive';
-import {Asset, ShippingLeg, ShippingTolerances} from './asset';
+import { Asset, ShippingLeg, ShippingTolerances } from './asset';
 
 
 type PartialWithRequired<T, K extends keyof T> = Partial<T> & Required<Pick<T, K>>;
 
 // This class contains all of the asset handling and governance logic.
-@Info({title: 'AssetTransfer', description: 'Smart contract for IoT asset tracking and shipping logistics'});
+@Info({title: 'AssetTransfer', description: 'Smart contract for IoT asset tracking and shipping logistics'})
 export class AssetTransferContract extends Contract {
+
+    private toStateBytes(value: unknown): Buffer {
+        // sort-keys-recursive requires plain objects; class instances must be flattened first.
+        const plainValue = JSON.parse(JSON.stringify(value));
+        return Buffer.from(stringify(sortKeysRecursive(plainValue)));
+    }
+
+    private parseJson<T>(raw: string, label: string): T {
+        try {
+            return JSON.parse(raw) as T;
+        } catch {
+            throw new Error(`Invalid JSON for ${label}`);
+        }
+    }
+
+    private parseAsset(assetJson: string): Asset {
+        return Object.assign(new Asset(''), JSON.parse(assetJson) as Asset);
+    }
+
+    private isWithin(_expectedLocation: unknown, _actualLocation: unknown): boolean {
+        return false;
+    }
 
     @Transaction()
     public async CreateAsset(ctx: Context, id: string): Promise<void> {
@@ -19,13 +41,12 @@ export class AssetTransferContract extends Contract {
         if (exists) throw new Error(`The asset ${id} already exists`);
 
         const asset = new Asset(id);
-        // insert the data in alphabetic order
-        await ctx.sub.putState(id, Buffer.from(stringify(sortKeysRecursive(asset))));
+        await ctx.stub.putState(id, this.toStateBytes(asset));
     }
 
     @Transaction(false)
     @Returns('boolean')
-    public async AssetExists(ctx: Context, id: string|undefined) {
+    public async AssetExists(ctx: Context, id: string): Promise<boolean> {
         if (id === null || id === undefined) return false;
         const assetJSON = await ctx.stub.getState(id);
         return assetJSON.length > 0;
@@ -33,7 +54,7 @@ export class AssetTransferContract extends Contract {
 
     // Get an asset from its id
     @Transaction(false)
-    public async ReadAsset(ctx: Context, id: string|undefined): Promise<string> {
+    public async ReadAsset(ctx: Context, id: string): Promise<string> {
         // somehow magically gets the asset from the current context
         const assetJSON = await ctx.stub.getState(id);
 
@@ -44,8 +65,9 @@ export class AssetTransferContract extends Contract {
 
 
     @Transaction()
-    public async setTolerances(ctx: Context, id:string, tolerances: ShippingTolerances): Promise<void> {
-        let asset: Asset = new Asset(JSON.parse(await this.ReadAsset(ctx, id)));
+    public async setTolerances(ctx: Context, id:string, tolerancesJson: string): Promise<void> {
+        const asset = this.parseAsset(await this.ReadAsset(ctx, id));
+        const tolerances = this.parseJson<ShippingTolerances>(tolerancesJson, 'tolerances');
 
         // check that the asset has not already started its journey
         if (asset.isShipped) {
@@ -54,7 +76,7 @@ export class AssetTransferContract extends Contract {
 
         asset.shippingTolerances = tolerances;
 
-        this.updateAsset(ctx, asset);
+        await this.updateAssetInternal(ctx, asset);
     }
 
 
@@ -66,8 +88,9 @@ export class AssetTransferContract extends Contract {
      * @param shippingLeg - The new shipping details
      */
     @Transaction()
-    public async addShippingLeg(ctx: Context, assetId: string, shippingLeg: ShippingLeg): Promise<void> {
-        let asset: Asset = new Asset(JSON.parse(await this.ReadAsset(ctx, assetId)));
+    public async addShippingLeg(ctx: Context, assetId: string, shippingLegJson: string): Promise<void> {
+        const asset = this.parseAsset(await this.ReadAsset(ctx, assetId));
+        const shippingLeg = this.parseJson<ShippingLeg>(shippingLegJson, 'shippingLeg');
 
         if (asset.isShipped || asset.isDelivered) {
             throw new Error(`Error, can't edit an asset that has already been shipped`);
@@ -77,9 +100,18 @@ export class AssetTransferContract extends Contract {
         
 
         asset.shippingLegs.push(shippingLeg);
-        this.updateAsset(ctx, asset)
+                await this.updateAssetInternal(ctx, asset);
 
     }
+
+            private async updateAssetInternal(ctx: Context, newAsset: PartialWithRequired<Asset, 'assetId'>): Promise<void> {
+                const existing = this.parseAsset(await this.ReadAsset(ctx, newAsset.assetId));
+
+                // takes left and updates it with all the values present in right
+                const updated = Object.assign(existing, newAsset);
+
+                await ctx.stub.putState(updated.assetId, this.toStateBytes(updated));
+            }
 
     /**
      * Update the asset with a partial mapping of new attribute values
@@ -88,13 +120,9 @@ export class AssetTransferContract extends Contract {
      * @returns 
      */
     @Transaction()
-    public async updateAsset(ctx: Context, newAsset: PartialWithRequired<Asset, 'assetId'>): Promise<void> {
-        let existing = new Asset(JSON.parse(await this.ReadAsset(ctx, newAsset.assetId)));
-        
-        // takes left and updates it with all the values present in right
-        let updated = Object.assign(existing, newAsset);
-        
-        return ctx.stub.putState(updated.assetId, Buffer.from(stringify(sortKeysRecursive(updated))));
+    public async updateAsset(ctx: Context, newAssetJson: string): Promise<void> {
+        const newAsset = this.parseJson<PartialWithRequired<Asset, 'assetId'>>(newAssetJson, 'asset');
+        await this.updateAssetInternal(ctx, newAsset);
     }
      
    /**
@@ -105,22 +133,31 @@ export class AssetTransferContract extends Contract {
     * @returns 
     */
     @Transaction()
-    public async assessDamage(ctx: Context, id: string|undefined): Promise<boolean> {
-        let asset = new Asset(JSON.parse(await this.ReadAsset(ctx, id)));
+    public async assessDamage(ctx: Context, id: string): Promise<boolean> {
+        const asset = this.parseAsset(await this.ReadAsset(ctx, id));
 
         // Haven't fully defined how we will be assessing the current state of
         // the asset, temp, location, etc
 
         // leaving this as a mock, this is a TODO item
-        let assetStats:Map<string, number> = asset.getCurrentState();
+        const assetStats: Map<string, number> = asset.getCurrentState();
         if (!assetStats) return true;
 
         for (const [tolName, tolVal] of Object.entries(asset.shippingTolerances)){
-            if (tolName.includes('Min') && assetStats.get(tolName) !== undefined) {
-                if (tolVal > assetStats.get(tolName)) return true;
+            if (typeof tolVal !== 'number') {
+                continue;
             }
-            else if (tolName.includes('Max') && assetStats.get(tolName) !== undefined) {
-                if (tolVal < assetStats.get(tolName)) return true;
+
+            const measured = assetStats.get(tolName);
+            if (measured === undefined) {
+                continue;
+            }
+
+            if (tolName.includes('Min')) {
+                if (tolVal > measured) return true;
+            }
+            else if (tolName.includes('Max')) {
+                if (tolVal < measured) return true;
             }
         }
 
@@ -146,8 +183,8 @@ export class AssetTransferContract extends Contract {
      * @param id 
      */
     @Transaction()
-    public async transferAsset(ctx: Context, id:string|undefined): Promise<void> {
-        const asset = new Asset(JSON.parse(await this.ReadAsset(ctx, id)));
+    public async transferAsset(ctx: Context, id:string): Promise<void> {
+        const asset = this.parseAsset(await this.ReadAsset(ctx, id));
         let isDamaged = asset.isDamaged;
 
         const damageMsg = `Cannot transfer a damaged asset - state unacceptable for delivery`;
@@ -158,7 +195,7 @@ export class AssetTransferContract extends Contract {
 
         isDamaged = await this.assessDamage(ctx, asset.assetId);
         if (isDamaged){
-            this.updateAsset(ctx, {...asset, isDamaged: true});
+            await this.updateAssetInternal(ctx, {...asset, isDamaged: true});
             throw new Error(damageMsg);
         }
 
@@ -171,8 +208,8 @@ export class AssetTransferContract extends Contract {
         // TODO, not sure how I am going to link delivery party identities with
         // an immutable delivery location, but that is what I am looking to do
         // here
-        const DELIVERY_LOCATIONS = {};
-        if (isWithin(DELIVERY_LOCATIONS[assetReceiver], assetCurrentLocation)){
+        const DELIVERY_LOCATIONS: Record<string, unknown> = {};
+        if (assetReceiver && this.isWithin(DELIVERY_LOCATIONS[assetReceiver.getID()], assetCurrentLocation)) {
             // TODO - this will need to be fleshed out better
 
             // Mark shipping leg complete, and transition on to the next one.
