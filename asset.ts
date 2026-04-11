@@ -3,7 +3,7 @@
     language is decided on.
 */
 
-import {Object, Property, ClientIdentity} from 'fabric-contract-api';
+import { ClientIdentity } from 'fabric-shim';
 
 /*
     In fabric, there is no more need to keep the asset handlers as a separate
@@ -17,8 +17,8 @@ import {Object, Property, ClientIdentity} from 'fabric-contract-api';
 export interface ShippingLeg {
     shippingHandler: ClientIdentity,
     shippingReceiver: ClientIdentity,
-    isComplete: Boolean
-    isSuccess: Boolean
+    isComplete: boolean,
+    isSuccess: boolean,
 
     transitTimeStartMs: number,
     maxTransitTimeMs: number,
@@ -37,43 +37,33 @@ export interface ShippingTolerances {
 }
 
 
-
-@Object()
 export class Asset {
     // internal tracking id
-    @Property()
     assetId: string;
 
     // flag to signal object construction is finished and asset is "live"
-    @Property()
-    isShipped: Boolean = false;
+    isShipped: boolean = false;
 
     // final state flag once a delivery is successful for asset tracking to
     // turn off
-    @Property()
-    isDelivered: Boolean = false;
+    isDelivered: boolean = false;
 
     // we want to avoid setting this to true
-    @Property()
-    isDamaged: Boolean = false;
+    isDamaged: boolean = false;
 
     // used for tracking location for custody hand offs
-    @Property()
     currentLat: number = 0;
-    @Property()
     currentLong: number = 0;
 
     // An array of legs - trips from one handler to another.
-    @Property()
     shippingLegs: ShippingLeg[] = [];
 
-    @Property()
     shippingTolerances: ShippingTolerances = {};
 
     constructor(
         assetId: string,
-        isShipped: boolean = false, isDelivered: Boolean = false,
-        isDamaged: Boolean = false, currentLat: number = 0,
+        isShipped: boolean = false, isDelivered: boolean = false,
+        isDamaged: boolean = false, currentLat: number = 0,
         currentLong: number = 0, shippingLegs: ShippingLeg[] = [],
     ) {
         this.assetId = assetId;
@@ -89,14 +79,18 @@ export class Asset {
      * TODO: Stub function, will fill in later. Might be able to merge with
      * getCurrentState()
      */
-    getCurrentLocation() {};
+    getCurrentLocation(): { lat: number; long: number } {
+        return { lat: this.currentLat, long: this.currentLong };
+    }
 
     /**
      * TODO: Stub function, will fill in later
      */
-    getCurrentState() {};
+    getCurrentState(): Map<string, number> {
+        return new Map<string, number>();
+    }
 
     getCurrentShippingLeg(): ShippingLeg|undefined {
-        return this.shippingLegs.find(leg => leg.isComplete)
+        return this.shippingLegs.find((leg) => !leg.isComplete);
     }
 }
