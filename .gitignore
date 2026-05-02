@@ -1,2 +1,12 @@
 .github/
 .cursor/
+
+node_modules/
+dist/
+
+# server runtime artifacts
+server/node_modules/
+server/dist/
+server/wallet/
+server/data/
+server/.env
