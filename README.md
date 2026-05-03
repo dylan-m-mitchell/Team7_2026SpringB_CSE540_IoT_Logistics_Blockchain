@@ -14,6 +14,15 @@ up and assess the current state of tracked assets and be assured that only the
 proper parties have access to the delivery and status records of all materials.
 
 
+# Backend + CLI
+
+A small REST backend and a `tt` CLI live under [`server/`](server/) and replace
+the verbose `peer chaincode invoke` commands with one-liners. The backend owns
+the Fabric gateway and an off-chain SQLite database (asset cache, telemetry,
+audit log). See [`server/README.md`](server/README.md) for install, wallet
+enrollment, and the example end-to-end flow (`npm run demo`).
+
+
 # Basic Background / Reading
 
 - Hyperledger Fabric:

@@ -100,7 +100,32 @@ Expected:
 peer lifecycle chaincode querycommitted -C "$CHANNEL_NAME" -n "$CC_NAME"
 ```
 
-## 5) Troubleshooting (Chaincode Container Exited)
+## 5) Run via the backend + CLI (alternative to raw `peer` invokes)
+
+Once the network is up and the chaincode is deployed, you can drive everything
+through the project backend instead of `peer chaincode invoke`:
+
+```bash
+cd server
+cp .env.example .env       # edit FABRIC_TESTNET if your path differs
+npm install
+npm run build
+npm run enroll-admin       # one-time: imports Org1 admin into local wallet
+npm start                  # leave running in this terminal
+```
+
+In another terminal, from the repo root:
+
+```bash
+npm run cli -- health
+npm run cli -- asset create asset_demo_01
+npm run cli -- asset get asset_demo_01
+npm run demo --prefix server   # walks the full example flow
+```
+
+Full reference: [`server/README.md`](server/README.md).
+
+## 6) Troubleshooting (Chaincode Container Exited)
 
 - Symptom: invoke/query returns `status:500` and chaincode container exits immediately.
 - Check chaincode container logs:
