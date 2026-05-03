@@ -32,7 +32,29 @@ export class AssetTransferContract extends Contract {
     }
 
     private isWithin(_expectedLocation: unknown, _actualLocation: unknown): boolean {
-        return false;
+        // If no expected location provided, allow transfer (no geofence)
+        if (!_expectedLocation) return true;
+
+        // Validate shapes
+        const expected = _expectedLocation as { lat: number; long: number; radiusMeters?: number };
+        const actual = _actualLocation as { lat: number; long: number } | undefined;
+        if (!actual || typeof actual.lat !== 'number' || typeof actual.long !== 'number') return false;
+
+        const toRad = (deg: number) => deg * Math.PI / 180;
+
+        const R = 6371000; // Earth radius in meters
+        const dLat = toRad(actual.lat - expected.lat);
+        const dLon = toRad(actual.long - expected.long);
+        const lat1 = toRad(expected.lat);
+        const lat2 = toRad(actual.lat);
+
+        const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.sin(dLon/2) * Math.sin(dLon/2) * Math.cos(lat1) * Math.cos(lat2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+        const distance = R * c;
+
+        const radius = typeof expected.radiusMeters === 'number' ? expected.radiusMeters : 100;
+        return distance <= radius;
     }
 
     @Transaction()
@@ -96,11 +118,16 @@ export class AssetTransferContract extends Contract {
             throw new Error(`Error, can't edit an asset that has already been shipped`);
         }
 
-        // TODO: check if user adding shipping leg is authorized
-        
+        // Authorization: only the declared shipping handler may add this leg
+        const callerId = ctx.clientIdentity && typeof ctx.clientIdentity.getID === 'function'
+            ? ctx.clientIdentity.getID()
+            : undefined;
+        if (!callerId || callerId !== shippingLeg.shippingHandler) {
+            throw new Error(`Unauthorized: caller ${callerId} is not the declared shippingHandler ${shippingLeg.shippingHandler} for asset ${assetId}`);
+        }
 
         asset.shippingLegs.push(shippingLeg);
-                await this.updateAssetInternal(ctx, asset);
+        await this.updateAssetInternal(ctx, asset);
 
     }
 
@@ -200,24 +227,44 @@ export class AssetTransferContract extends Contract {
         }
 
 
-        // TODO, hasn't been implemented because I don't know where we're storing
-        // the data
+        // Determine current location and receiver
         const assetCurrentLocation = asset.getCurrentLocation();
-        const assetReceiver = asset.getCurrentShippingLeg()?.shippingReceiver;
+        const currentLeg = asset.getCurrentShippingLeg();
+        const assetReceiver = currentLeg?.shippingReceiver;
 
-        // TODO, not sure how I am going to link delivery party identities with
-        // an immutable delivery location, but that is what I am looking to do
-        // here
-        const DELIVERY_LOCATIONS: Record<string, unknown> = {};
-        if (assetReceiver && this.isWithin(DELIVERY_LOCATIONS[assetReceiver.getID()], assetCurrentLocation)) {
-            // TODO - this will need to be fleshed out better
+        // In-function mapping of delivery locations (empty by default)
+        const DELIVERY_LOCATIONS: Record<string, { lat: number; long: number; radiusMeters?: number }> = {};
 
-            // Mark shipping leg complete, and transition on to the next one.
-            // If there is no next shipping leg, mark the asset as successfully
-            // finally delivered
-
-            // Finally save the updated asset
+        if (!assetReceiver) {
+            throw new Error(`Cannot transfer asset ${asset.assetId}: no current shipping receiver defined`);
         }
+
+        const expectedLocation = DELIVERY_LOCATIONS[assetReceiver];
+        if (expectedLocation && !this.isWithin(expectedLocation, assetCurrentLocation)) {
+            throw new Error(`Asset ${asset.assetId} cannot be transferred to ${assetReceiver}: delivery location not reached`);
+        }
+
+        // Mark current shipping leg complete and set shipped flag
+        if (currentLeg) {
+            currentLeg.isComplete = true;
+        }
+        asset.isShipped = true;
+
+        // If no remaining incomplete legs, mark delivered
+        const hasIncomplete = asset.shippingLegs.some((leg) => !leg.isComplete);
+        if (!hasIncomplete) {
+            asset.isDelivered = true;
+        } else {
+            // start transit for the next incomplete leg
+            const nextLeg = asset.shippingLegs.find((leg) => !leg.isComplete);
+            if (nextLeg) nextLeg.transitTimeStartMs = Date.now();
+        }
+
+        await this.updateAssetInternal(ctx, asset);
+
+        // Emit transfer event
+        const eventPayload = { assetId: asset.assetId, to: assetReceiver };
+        await ctx.stub.setEvent('AssetTransfer', Buffer.from(JSON.stringify(eventPayload)));
         
     }
 }

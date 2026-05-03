@@ -3,7 +3,8 @@
     language is decided on.
 */
 
-import { ClientIdentity } from 'fabric-shim';
+// Note: we store identity IDs (string) rather than fabric `ClientIdentity`
+// so that ShippingLeg is JSON-serializable.
 
 /*
     In fabric, there is no more need to keep the asset handlers as a separate
@@ -15,14 +16,18 @@ import { ClientIdentity } from 'fabric-shim';
 */
 
 export interface ShippingLeg {
-    shippingHandler: ClientIdentity,
-    shippingReceiver: ClientIdentity,
+    // Identity IDs (e.g. MSP ID or certificate fingerprint) for handler/receiver
+    shippingHandler: string,
+    shippingReceiver: string,
     isComplete: boolean,
     isSuccess: boolean,
 
     transitTimeStartMs: number,
     maxTransitTimeMs: number,
-};
+
+    // Optional latest sensor measurements for this leg (keyed by sensor id/name)
+    sensorReadings?: Record<string, number>;
+}
 
 // The common per-item tolerances that apply to every shipping leg
 export interface ShippingTolerances {
@@ -87,7 +92,16 @@ export class Asset {
      * TODO: Stub function, will fill in later
      */
     getCurrentState(): Map<string, number> {
-        return new Map<string, number>();
+        // Build a Map from the current shipping leg's sensorReadings, if present.
+        const leg = this.getCurrentShippingLeg();
+        if (!leg || !leg.sensorReadings) return new Map<string, number>();
+
+        const m = new Map<string, number>();
+        for (const [k, v] of Object.entries(leg.sensorReadings)) {
+            // only include numeric readings
+            if (typeof v === 'number' && Number.isFinite(v)) m.set(k, v);
+        }
+        return m;
     }
 
     getCurrentShippingLeg(): ShippingLeg|undefined {
