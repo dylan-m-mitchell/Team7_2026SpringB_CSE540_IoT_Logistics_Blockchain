@@ -21,7 +21,7 @@ If either path starts with `/mnt/c/`, install Node inside WSL first (for example
 ## 2) Build + Deploy Chaincode (README Sequence)
 
 ```bash
-CC_PATH=/home/dylan/repos/CSE540_Team7_Project
+CC_PATH=/home/dylan/repos/Team7_2026SpringB_CSE540_IoT_Logistics_Blockchain
 FABRIC_TESTNET=/home/dylan/fabric-samples/test-network
 CC_NAME=assetTransfer
 CHANNEL_NAME=mychannel
